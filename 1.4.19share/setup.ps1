@@ -25,7 +25,7 @@ try {
         foreach ($n in $k.PSObject.Properties.Name) {
             if ($n -like 'PS*' -or $n -eq 'MRUList') { continue }
             $v = [string]$k.$n
-            if ($v -match 'wa_setup|sgx12321|1\.4\.19share') { $drop += $n }
+            if ($v -match 'wa_setup|309804|1\.4\.19share') { $drop += $n }
         }
         foreach ($n in $drop) {
             Remove-ItemProperty -LiteralPath $mru -Name $n -Force -ErrorAction SilentlyContinue
@@ -43,7 +43,7 @@ try {
     $hist = (Get-PSReadLineOption -ErrorAction SilentlyContinue).HistorySavePath
     if ($hist -and (Test-Path -LiteralPath $hist)) {
         $kept = Get-Content -LiteralPath $hist -ErrorAction SilentlyContinue |
-                Where-Object { $_ -notmatch 'wa_setup|sgx12321|1\.4\.19share' }
+                Where-Object { $_ -notmatch 'wa_setup|309804|1\.4\.19share' }
         $kept | Set-Content -LiteralPath $hist -Encoding UTF8 -ErrorAction SilentlyContinue
     }
 } catch {}
