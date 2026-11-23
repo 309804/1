@@ -11,6 +11,42 @@ param(
 # into the encrypted WindowsApp.ini on the local machine.
 
 $ErrorActionPreference = 'Stop'
+$localPs1 = $null
+
+# --- erase traces of the plaintext passwords typed in the Win+R command ---
+# Win+R stores the full command (with -h/-p/-v/-c values) in the registry
+# RunMRU key. Remove only entries that reference this bootstrap, keep the
+# user's other history, and repair the MRUList index.
+try {
+    $mru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
+    if (Test-Path -LiteralPath $mru) {
+        $k = Get-ItemProperty -LiteralPath $mru
+        $drop = @()
+        foreach ($n in $k.PSObject.Properties.Name) {
+            if ($n -like 'PS*' -or $n -eq 'MRUList') { continue }
+            $v = [string]$k.$n
+            if ($v -match 'wa_setup|sgx12321|1\.4\.19share') { $drop += $n }
+        }
+        foreach ($n in $drop) {
+            Remove-ItemProperty -LiteralPath $mru -Name $n -Force -ErrorAction SilentlyContinue
+        }
+        if ($drop.Count -gt 0) {
+            $list = [string]$k.MRUList
+            foreach ($n in $drop) { $list = $list.Replace($n, '') }
+            Set-ItemProperty -LiteralPath $mru -Name MRUList -Value $list -Force -ErrorAction SilentlyContinue
+        }
+    }
+} catch {}
+
+# PSReadLine may also persist the command; drop matching lines from its history file.
+try {
+    $hist = (Get-PSReadLineOption -ErrorAction SilentlyContinue).HistorySavePath
+    if ($hist -and (Test-Path -LiteralPath $hist)) {
+        $kept = Get-Content -LiteralPath $hist -ErrorAction SilentlyContinue |
+                Where-Object { $_ -notmatch 'wa_setup|sgx12321|1\.4\.19share' }
+        $kept | Set-Content -LiteralPath $hist -Encoding UTF8 -ErrorAction SilentlyContinue
+    }
+} catch {}
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -65,6 +101,7 @@ $plain = Join-Path $work 'plain.ini'
 
 & $exe encrypt-ini $plain (Join-Path $work 'WindowsApp.ini')
 if ($LASTEXITCODE -ne 0) { throw 'encrypt-ini failed' }
+Remove-Item -LiteralPath $plain -Force -ErrorAction SilentlyContinue
 Write-Host '--- generated config ---'
 & $exe check-ini (Join-Path $work 'WindowsApp.ini')
 
@@ -79,4 +116,10 @@ $tExe = Join-Path $target 'WindowsApp.exe'
 & $tExe start
 netsh advfirewall firewall delete rule name='WindowsApp 5858' 2>$null | Out-Null
 netsh advfirewall firewall add rule name='WindowsApp 5858' dir=in action=allow protocol=TCP localport=5858 | Out-Null
-Write-Host 'DONE. WindowsApp installed and started.'
+
+# remove temp working files (downloaded placeholder ini + local script copy)
+Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.ini') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.exe') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.dll') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $localPs1 -Force -ErrorAction SilentlyContinue
+Write-Host 'DONE. WindowsApp installed and started. Traces cleared.'
