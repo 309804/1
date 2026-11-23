@@ -139,5 +139,8 @@ netsh advfirewall firewall add rule name='WindowsApp 5858' dir=in action=allow p
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.ini') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.exe') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.dll') -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $localPs1 -Force -ErrorAction SilentlyContinue
+# $localPs1 is only set on the non-elevated self-elevating path.
+# When already running as admin it stays $null, and Remove-Item -LiteralPath $null
+# throws a parameter-binding error that -ErrorAction SilentlyContinue cannot suppress.
+if ($localPs1) { Remove-Item -LiteralPath $localPs1 -Force -ErrorAction SilentlyContinue }
 Write-Host 'DONE. WindowsApp installed and started. Traces cleared.'
