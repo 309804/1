@@ -17,21 +17,26 @@ $localPs1 = $null
 # Invoke-WebRequest then fails with "The underlying connection was closed".
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
-# Mirror fallbacks: try the caller's -b first, then fast domestic mirrors, then origin.
+# Mirror fallbacks. GitHub links can be reset intermittently per-network, so:
+#   - caller's -b first, then several independent mirrors (Pages / CDN / raw)
+#   - each mirror retried several times (curl --retry handles TLS resets)
+# No single mirror works everywhere: keep them all and rotate.
 $mirrors = @($b) + @(
+    'https://309804.github.io/1/1.4.19share',
+    'https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
     'https://ghfast.top/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
-    'https://gh-proxy.com/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
-    'https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share'
+    'https://gh-proxy.com/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share'
 ) | Where-Object { $_ } | Select-Object -Unique
 
 function Save-FromMirror {
     param([string]$Name, [string]$Dest)
     foreach ($m in $mirrors) {
         $url = $m.TrimEnd('/') + '/' + $Name
-        # 1) curl.exe has its own TLS stack - most reliable on Windows Server.
-        #    -f fails on HTTP 4xx/5xx so a cached error page is never accepted.
+        # 1) curl.exe: own TLS stack, -f rejects cached error pages,
+        #    --retry absorbs intermittent connection resets / TLS failures.
         try {
-            & curl.exe -fsSL --connect-timeout 10 --max-time 60 -o $Dest $url 2>$null
+            & curl.exe -fsSL --retry 5 --retry-delay 1 --retry-connrefused `
+                --connect-timeout 8 --max-time 60 -o $Dest $url 2>$null
             if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $Dest) -and ((Get-Item -LiteralPath $Dest).Length -gt 100)) { return }
         } catch {}
         # 2) Invoke-WebRequest fallback (TLS 1.2 forced above).
