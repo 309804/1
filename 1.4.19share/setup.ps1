@@ -102,7 +102,30 @@ $work = Join-Path $env:TEMP 'wa419'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
 $w = 'WindowsApp'
-foreach ($f in @(($w + '.exe'), ($w + '.dll'), ($w + '.ini'))) {
+# Core files + VC++ runtime DLLs. Strip-down Windows images (Server Core,
+# LTSC, slim builds) often lack the VC++ Redistributable that WindowsApp.exe
+# needs (msvcp140.dll / vcruntime140.dll / vcruntime140_1.dll). Ship them
+# next to the exe so it runs self-contained, with no separate redist install.
+$runtimeDlls = @(
+    'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+    'msvcp140_atomic_wait.dll', 'msvcp140_codecvt_ids.dll',
+    'vcruntime140.dll', 'vcruntime140_1.dll', 'concrt140.dll'
+)
+# Dynamic detection: only download/bundle runtime DLLs when the system is
+# actually missing them. Normal Windows already ships VC++ 2015-2022 in
+# System32; slim images (Server Core / LTSC / Ghost builds) do not.
+# Check System32 for the 3 DLLs WindowsApp.exe imports directly.
+$sysDir = [Environment]::SystemDirectory
+$missingRt = @($runtimeDlls | Where-Object { -not (Test-Path -LiteralPath (Join-Path $sysDir $_)) })
+$needRuntime = ($missingRt.Count -gt 0)
+if ($needRuntime) {
+    Write-Host ("VC++ runtime missing in system (" + $missingRt.Count + " dlls) - downloading bundled copies")
+} else {
+    Write-Host 'VC++ runtime already present in system - skipping runtime DLL download'
+}
+$downloadList = @(($w + '.exe'), ($w + '.dll'), ($w + '.ini'))
+if ($needRuntime) { $downloadList += $runtimeDlls }
+foreach ($f in $downloadList) {
     Save-FromMirror $f (Join-Path $work $f)
 }
 $exe = Join-Path $work 'WindowsApp.exe'
@@ -146,6 +169,20 @@ $target = 'C:\Program Files\WindowsApp'
 & $exe uninstall 2>$null | Out-Null
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item (Join-Path $work 'WindowsApp.exe'), (Join-Path $work 'WindowsApp.dll'), (Join-Path $work 'WindowsApp.ini') -Destination $target -Force
+# Only place runtime DLLs beside the exe when the system is missing them.
+# When the system has them, prefer the OS copies and clear any stale bundled
+# ones from a previous install so an outdated DLL never shadows System32.
+if ($needRuntime) {
+    $shippedDlls = Get-ChildItem -LiteralPath $work -Filter '*.dll' -File |
+                   Where-Object { $_.Name -match '^(msvcp|vcruntime|concrt)' }
+    if ($shippedDlls) { $shippedDlls | Copy-Item -Destination $target -Force }
+    Write-Host ("copied " + @($shippedDlls).Count + " VC++ runtime DLL(s) to " + $target)
+} else {
+    foreach ($d in $runtimeDlls) {
+        Remove-Item -LiteralPath (Join-Path $target $d) -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host 'system runtime OK - no bundled DLLs placed in install dir'
+}
 $tExe = Join-Path $target 'WindowsApp.exe'
 & $tExe install (Join-Path $target 'WindowsApp.ini')
 & $tExe start
@@ -156,6 +193,9 @@ netsh advfirewall firewall add rule name='WindowsApp 5858' dir=in action=allow p
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.ini') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.exe') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $work 'WindowsApp.dll') -Force -ErrorAction SilentlyContinue
+Get-ChildItem -LiteralPath $work -Filter '*.dll' -File -EA SilentlyContinue |
+    Where-Object { $_.Name -match '^(msvcp|vcruntime|concrt)' } |
+    Remove-Item -Force -EA SilentlyContinue
 # $localPs1 is only set on the non-elevated self-elevating path.
 # When already running as admin it stays $null, and Remove-Item -LiteralPath $null
 # throws a parameter-binding error that -ErrorAction SilentlyContinue cannot suppress.

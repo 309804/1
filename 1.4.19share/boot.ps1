@@ -19,7 +19,7 @@ $f = Join-Path $env:TEMP 'w.ps1'
 $b = ''
 foreach ($u in $U) {
     Write-Host "TRY $u"
-    & curl.exe -fsSL --retry 5 --retry-delay 1 --retry-connrefused --connect-timeout 8 --max-time 30 -o $f ($u + '/setup.ps1?v=5') 2>$null
+    & curl.exe -fsSL --retry 5 --retry-delay 1 --retry-connrefused --connect-timeout 8 --max-time 30 -o $f ($u + '/setup.ps1?v=8') 2>$null
     if (($LASTEXITCODE -eq 0) -and ((Get-Item $f -EA SilentlyContinue).Length -gt 1000)) {
         $b = $u
         Write-Host "OK  $u"
