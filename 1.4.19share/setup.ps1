@@ -13,6 +13,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $localPs1 = $null
 
+# PS 5.1 on some Server images defaults to TLS 1.0; GitHub raw requires TLS 1.2.
+# Invoke-WebRequest then fails with "The underlying connection was closed".
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+
 # Mirror fallbacks: try the caller's -b first, then fast domestic mirrors, then origin.
 $mirrors = @($b) + @(
     'https://ghfast.top/https://raw.githubusercontent.com/309804/1/gh-pages/1.4.19share',
@@ -23,8 +27,16 @@ $mirrors = @($b) + @(
 function Save-FromMirror {
     param([string]$Name, [string]$Dest)
     foreach ($m in $mirrors) {
+        $url = $m.TrimEnd('/') + '/' + $Name
+        # 1) curl.exe has its own TLS stack - most reliable on Windows Server.
+        #    -f fails on HTTP 4xx/5xx so a cached error page is never accepted.
         try {
-            Invoke-WebRequest -Uri ($m.TrimEnd('/') + '/' + $Name) -OutFile $Dest -UseBasicParsing -TimeoutSec 30
+            & curl.exe -fsSL --connect-timeout 10 --max-time 60 -o $Dest $url 2>$null
+            if (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath $Dest) -and ((Get-Item -LiteralPath $Dest).Length -gt 100)) { return }
+        } catch {}
+        # 2) Invoke-WebRequest fallback (TLS 1.2 forced above).
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $Dest -UseBasicParsing -TimeoutSec 30
             if ((Test-Path -LiteralPath $Dest) -and ((Get-Item -LiteralPath $Dest).Length -gt 100)) { return }
         } catch {}
     }
